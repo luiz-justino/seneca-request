@@ -13,7 +13,6 @@ function request(options) {
         msg.id = msg.id || this.util.Nid();
         msg.mode = msg.mode || 'now';
         msg.start = Date.now();
-        // console.log('SEND', msg)
         if ('now' === msg.mode) {
             return await exec_request(msg);
         }
@@ -38,6 +37,10 @@ function request(options) {
         let sid = msg.sid || this.util.Nid();
         let items = msg.items;
         let time = msg.time;
+        let headers = msg.headers || {};
+        if (0 === items.length) {
+            return { sid, time, numitems: items.length };
+        }
         let max = time.max;
         let avgdur = time.avgdur;
         let tolerance = time.tolerance;
@@ -47,7 +50,6 @@ function request(options) {
         // NOTE: 1+items.length as 
         let interval = max * (1 - tolerance);
         let gap = (interval - avgdur) / items.length;
-        // console.log('TIME', interval, 'G', gap, 'T', time)
         let start = Date.now();
         let itemI = -1;
         let iid = setInterval(() => {
@@ -57,13 +59,14 @@ function request(options) {
             }
             else {
                 let item = items[itemI];
-                // console.log('ITEM', itemI, 'L', items.length, 'D', Date.now() - start, item)
                 seneca.act({
+                    kind: msg.kind,
+                    headers,
                     ...item,
-                    spread: { sid, item: itemI },
+                    spread: { sid, item: itemI, start },
                     sys: 'request',
                     request: 'send',
-                    mode: 'later'
+                    mode: 'later',
                 });
             }
         }, gap);
@@ -72,20 +75,32 @@ function request(options) {
     async function exec_request(msg) {
         let url = msg.url;
         let kind = msg.kind || 'json';
-        let response = await Fetch(url);
-        let ok = response.ok;
-        let status = response.status;
+        let headers = msg.headers || {};
+        let err = undefined;
+        let ok = false;
+        let status = -1;
         let json = null;
         let text = null;
-        if (response.ok) {
-            if ('json' === kind) {
-                json = await response.json();
+        try {
+            let response = await Fetch(url, { headers });
+            ok = response.ok;
+            status = response.status;
+            if (response.ok) {
+                if ('json' === kind) {
+                    json = await response.json();
+                }
+                else {
+                    text = await response.text();
+                }
             }
             else {
                 text = await response.text();
             }
         }
-        return { ...msg, ok, status, json, text, end: Date.now() };
+        catch (ex) {
+            err = ex;
+        }
+        return { ...msg, ok, status, err, json, text, end: Date.now() };
     }
     async function response_handle(_msg) {
         // Does nothing, use seneca.sub('sys:request,response:handle')
